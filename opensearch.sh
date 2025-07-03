@@ -51,6 +51,26 @@ sudo useradd -r -s /usr/sbin/nologin opensearch
 sudo chown -R opensearch:opensearch /opt/opensearch
 
 # Start OpenSearch in the foreground
+# Start OpenSearch in background and keep it alive for 1 minute
 cd /opt/opensearch/opensearch-2.5.0
-echo "Starting OpenSearch in foreground. Use another terminal to run: curl http://localhost:9200"
-sudo -u opensearch ./bin/opensearch
+echo "Starting OpenSearch in background for 60 seconds..."
+
+sudo -u opensearch timeout 60s ./bin/opensearch &
+
+# Wait for OpenSearch to come up
+echo "Waiting for OpenSearch to start..."
+sleep 20  # Optional: small buffer before first curl
+
+RETRIES=10
+until curl -s http://localhost:9200 >/dev/null; do
+  ((RETRIES--))
+  if [ $RETRIES -le 0 ]; then
+    echo "❌ OpenSearch did not respond within expected time."
+    exit 1
+  fi
+  echo "Still waiting..."
+  sleep 5
+done
+
+echo "✅ OpenSearch is up!"
+curl http://localhost:9200
