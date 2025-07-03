@@ -3,37 +3,35 @@
 # Prompt for your server address
 read -p "Enter your server address: " SERVER_ADDRESS
 
-# Update package list
+# Exit on error
+set -e
+
+echo "🔧 Updating and installing prerequisites..."
 sudo apt-get update
+sudo apt-get install -y openjdk-17-jdk wget tar curl
 
-# Install OpenJDK 17
-sudo apt-get install -y openjdk-17-jdk
-
-# Set JAVA_HOME and update PATH in .bashrc
+echo "🧩 Setting JAVA_HOME..."
 echo 'export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64' >> ~/.bashrc
 echo 'export PATH=$JAVA_HOME/bin:$PATH' >> ~/.bashrc
-
-# Apply the changes
 source ~/.bashrc
 
-# Create log directory for OpenSearch
-sudo mkdir -p /var/log/opensearch
-
-# Create OpenSearch directory and navigate into it
+echo "📁 Creating required directories..."
 sudo mkdir -p /opt/opensearch
+sudo mkdir -p /var/log/opensearch
+sudo mkdir -p /opt/opensearch/logs
+
+echo "⬇️ Downloading OpenSearch 2.5.0..."
 cd /opt/opensearch
-
-# Download OpenSearch 2.5.0
 sudo wget https://artifacts.opensearch.org/releases/bundle/opensearch/2.5.0/opensearch-2.5.0-linux-x64.tar.gz
-
-# Extract the tar.gz file
 sudo tar -xzf opensearch-2.5.0-linux-x64.tar.gz
+sudo rm opensearch-2.5.0-linux-x64.tar.gz
 
-# Modify OpenSearch configuration
-cd /opt/opensearch/opensearch-2.5.0/config
+echo "👤 Creating opensearch user..."
+sudo useradd -r -s /usr/sbin/nologin opensearch || true
+sudo chown -R opensearch:opensearch /opt/opensearch /var/log/opensearch
 
-sudo tee opensearch.yml > /dev/null <<EOF
-# ======================== OpenSearch Configuration =========================
+echo "🛠️ Writing OpenSearch configuration..."
+cat <<EOF | sudo tee /opt/opensearch/opensearch-2.5.0/config/opensearch.yml > /dev/null
 cluster.name: my-application
 node.name: node-1
 path.logs: /var/log/opensearch
@@ -44,28 +42,40 @@ discovery.seed_hosts: ["$SERVER_ADDRESS"]
 plugins.security.disabled: true
 EOF
 
-# Create a system user for OpenSearch
-sudo useradd -r -s /usr/sbin/nologin opensearch
+echo "📝 Creating systemd service for OpenSearch..."
+cat <<EOF | sudo tee /etc/systemd/system/opensearch.service > /dev/null
+[Unit]
+Description=OpenSearch Service
+After=network.target
 
-# Change ownership of OpenSearch installation
-sudo chown -R opensearch:opensearch /opt/opensearch
+[Service]
+Type=simple
+User=opensearch
+Group=opensearch
+ExecStart=/opt/opensearch/opensearch-2.5.0/bin/opensearch
+Restart=always
+LimitNOFILE=65535
+TimeoutStartSec=180
 
-# Start OpenSearch in the foreground
-# Start OpenSearch in background and keep it alive for 1 minute
-cd /opt/opensearch/opensearch-2.5.0
-echo "Starting OpenSearch in background for 60 seconds..."
+[Install]
+WantedBy=multi-user.target
+EOF
 
-sudo -u opensearch timeout 60s ./bin/opensearch &
+echo "🔄 Reloading systemd daemon..."
+sudo systemctl daemon-reexec
+sudo systemctl daemon-reload
 
-# Wait for OpenSearch to come up
-echo "Waiting for OpenSearch to start..."
-sleep 20  # Optional: small buffer before first curl
+echo "🚀 Enabling and starting OpenSearch..."
+sudo systemctl enable opensearch
+sudo systemctl start opensearch
 
-RETRIES=10
+echo "⏳ Waiting for OpenSearch to be ready..."
+RETRIES=15
 until curl -s http://localhost:9200 >/dev/null; do
   ((RETRIES--))
   if [ $RETRIES -le 0 ]; then
-    echo "❌ OpenSearch did not respond within expected time."
+    echo "❌ OpenSearch failed to respond in time."
+    journalctl -u opensearch --no-pager | tail -n 20
     exit 1
   fi
   echo "Still waiting..."
