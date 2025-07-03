@@ -50,9 +50,7 @@ sudo useradd -r -s /usr/sbin/nologin opensearch
 # Change ownership of OpenSearch installation
 sudo chown -R opensearch:opensearch /opt/opensearch
 
-# Start OpenSearch as the opensearch user in background
+# Start OpenSearch in the foreground
 cd /opt/opensearch/opensearch-2.5.0
-sudo -u opensearch nohup ./bin/opensearch > /opt/opensearch/logs/opensearch.out 2>&1 &
-
-# Test if OpenSearch is up
-curl http://localhost:9200
+echo "Starting OpenSearch in foreground. Use another terminal to run: curl http://localhost:9200"
+sudo -u opensearch ./bin/opensearch
